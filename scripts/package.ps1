@@ -101,39 +101,42 @@ function Build-SingleExe {
 
     # Run Launch4j to wrap the JAR into a .exe that uses the bundled jre/
     Write-Host "[$AppName] Running Launch4j..."
-    # Locate launch4jc.exe - Chocolatey does not shim the headless CLI binary
+    # Locate the launch4j installation directory
+    $L4jDir = $null
     $Launch4jcExe = Get-Command "launch4jc" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-    if (-not $Launch4jcExe) {
+    if ($Launch4jcExe) {
+        $L4jDir = Split-Path $Launch4jcExe -Parent
+    } else {
         $SearchDirs = @(
             "${env:ProgramFiles(x86)}\Launch4j",
             "${env:ProgramFiles}\Launch4j"
         )
-        $Launch4jcExe = $SearchDirs |
-            ForEach-Object { Join-Path $_ "launch4jc.exe" } |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
+        $L4jDir = $SearchDirs | Where-Object { Test-Path (Join-Path $_ "launch4jc.exe") } | Select-Object -First 1
     }
-    if (-not $Launch4jcExe) {
-        $Launch4jcExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\launch4j" `
+    if (-not $L4jDir) {
+        $L4jDir = Get-ChildItem "C:\ProgramData\chocolatey\lib\launch4j" `
             -Filter "launch4jc.exe" -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullName
+            Select-Object -First 1 | ForEach-Object { Split-Path $_.FullName -Parent }
     }
-    if (-not $Launch4jcExe) { Write-Error "launch4jc.exe not found. Ensure Launch4j is installed." }
-    Write-Host "[$AppName] Using launch4jc at: $Launch4jcExe"
-    # launch4j 3.14 requires Java 8 to run; temporarily point to JDK 8 if available
-    $OrigJavaHome = $env:JAVA_HOME
-    $OrigPath     = $env:PATH
-    try {
-        if ($env:JAVA_HOME_8_X64) {
-            $env:JAVA_HOME = $env:JAVA_HOME_8_X64
-            $env:PATH      = "$env:JAVA_HOME_8_X64\bin;$env:PATH"
-        }
-        & $Launch4jcExe $TempXml
-        if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
-    } finally {
-        $env:JAVA_HOME = $OrigJavaHome
-        $env:PATH      = $OrigPath
+    if (-not $L4jDir) { Write-Error "Launch4j installation not found. Ensure Launch4j is installed." }
+
+    # Locate launch4j.jar – running it directly with Java 8 avoids the launch4jc.exe
+    # wrapper's own Java 8 registry lookup (which fails when Java 17 is registered).
+    $L4jJar = Get-ChildItem $L4jDir -Filter "launch4j*.jar" -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+    if (-not $L4jJar) { Write-Error "launch4j JAR not found in $L4jDir" }
+
+    # Use the Java 8 binary directly so launch4j gets the right runtime regardless
+    # of what is registered in the Windows Registry.
+    $JavaExe = if ($env:JAVA_HOME_8_X64) {
+        Join-Path $env:JAVA_HOME_8_X64 "bin\java.exe"
+    } else {
+        "java"
     }
+    Write-Host "[$AppName] Using launch4j JAR: $L4jJar"
+    Write-Host "[$AppName] Using Java: $JavaExe"
+    & $JavaExe -jar $L4jJar $TempXml
+    if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
     Write-Host "[$AppName] ✓ $ExeBaseName.exe created"
 
     # Place config and README alongside the exe (warp will bundle them too).
