@@ -49,6 +49,14 @@ jre/
 jre-bundle/
 custom-jre/
 
+# Generated config files
+*.properties.local
+*.properties.bak
+
+# Cache files
+*.cache
+*.tmp
+
 # Launch4j
 launch4j/
 *.zip

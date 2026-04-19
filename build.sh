@@ -1,23 +1,31 @@
 #!/bin/bash
-# Build script for Remote Control Application
+# Build and Package script for Remote Control Application (Unix/Mac)
 
-echo "=== Building Remote Control Application ==="
+set -e  # Exit on error
 
-# Step 1: Build Server JAR
+echo "======================================"
+echo "Remote Control App - Build Script"
+echo "======================================"
 echo ""
-echo "Step 1: Building Server JAR..."
+
+# Step 1: Build with Maven
+echo "Step 1: Building with Maven..."
 mvn clean package -DskipTests
 
 if [ $? -ne 0 ]; then
-    echo "❌ Server build failed!"
+    echo ""
+    echo "❌ ERROR: Maven build failed!"
+    echo "Please check your Java installation and pom.xml configuration"
     exit 1
 fi
 
-echo "✅ Server JAR built: target/remote-server.jar"
-
-# Step 2: Build Client JAR
 echo ""
-echo "Step 2: Building Client JAR..."
+echo "✅ Maven build completed successfully"
+echo ""
+
+# Step 2: Package into ZIP files
+echo "Step 2: Packaging into ZIP files..."
+bash ./scripts/package.sh
 mvn clean package -Pclient -DskipTests
 
 if [ $? -ne 0 ]; then

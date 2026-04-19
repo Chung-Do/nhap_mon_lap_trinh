@@ -1,12 +1,29 @@
 @echo off
-REM Build script for Remote Control Application (Windows)
+REM Build and Package script for Remote Control Application (Windows)
 
-echo === Building Remote Control Application ===
-
-REM Step 1: Build Server JAR
+echo ======================================
+echo Remote Control App - Build Script
+echo ======================================
 echo.
-echo Step 1: Building Server JAR...
+
+REM Step 1: Build with Maven
+echo Step 1: Building with Maven...
 call mvn clean package -DskipTests
+if errorlevel 1 (
+    echo.
+    echo ERROR: Maven build failed!
+    echo Please check your Java installation and pom.xml configuration
+    pause
+    exit /b 1
+)
+
+echo.
+echo Step 2: Maven build completed successfully
+echo.
+
+REM Step 2: Package into ZIP files
+echo Step 3: Packaging into ZIP files...
+call .\scripts\package.bat
 
 if errorlevel 1 (
     echo Build failed!
