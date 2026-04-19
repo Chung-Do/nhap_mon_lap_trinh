@@ -101,7 +101,26 @@ function Build-SingleExe {
 
     # Run Launch4j to wrap the JAR into a .exe that uses the bundled jre/
     Write-Host "[$AppName] Running Launch4j..."
-    & launch4jc $TempXml
+    # Locate launch4jc.exe - Chocolatey does not shim the headless CLI binary
+    $Launch4jcExe = Get-Command "launch4jc" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+    if (-not $Launch4jcExe) {
+        $SearchDirs = @(
+            "${env:ProgramFiles(x86)}\Launch4j",
+            "${env:ProgramFiles}\Launch4j"
+        )
+        $Launch4jcExe = $SearchDirs |
+            ForEach-Object { Join-Path $_ "launch4jc.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+    }
+    if (-not $Launch4jcExe) {
+        $Launch4jcExe = Get-ChildItem "C:\ProgramData\chocolatey\lib\launch4j" `
+            -Filter "launch4jc.exe" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $Launch4jcExe) { Write-Error "launch4jc.exe not found. Ensure Launch4j is installed." }
+    Write-Host "[$AppName] Using launch4jc at: $Launch4jcExe"
+    & $Launch4jcExe $TempXml
     if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
     Write-Host "[$AppName] ✓ $ExeBaseName.exe created"
 
