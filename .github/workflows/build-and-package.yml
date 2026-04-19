@@ -15,27 +15,8 @@ jobs:
       # Step 1: Checkout repository
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      # Step 2a: Setup JDK 8 first so JAVA_HOME_8_X64 is available for Launch4j
-      - name: Set up JDK 8 (required by Launch4j 3.14)
-        uses: actions/setup-java@v4
-        with:
-          java-version: '8'
-          distribution: 'temurin'
 
-      # Verify JDK 8 installation
-      - name: Verify JDK 8 Installation
-        run: |
-          echo "JAVA_HOME_8_X64: $env:JAVA_HOME_8_X64"
-          if (Test-Path "$env:JAVA_HOME_8_X64\bin\java.exe") {
-            & "$env:JAVA_HOME_8_X64\bin\java.exe" -version
-            Write-Host "✓ JDK 8 verified" -ForegroundColor Green
-          } else {
-            Write-Error "JDK 8 not found at expected location"
-          }
-        shell: pwsh
-
-      # Step 2b: Setup Java (JDK 17 – jlink ships with JDK 9+, overrides JAVA_HOME)
+      # Step 2: Setup Java (JDK 17 for Maven build, jlink, and Launch4j)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

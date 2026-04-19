@@ -120,16 +120,15 @@ function Build-SingleExe {
     }
     if (-not $L4jDir) { Write-Error "Launch4j installation not found. Ensure Launch4j is installed." }
 
-    # Locate launch4j.jar – running it directly with Java 8 avoids the launch4jc.exe
-    # wrapper's own Java 8 registry lookup (which fails when Java 17 is registered).
+    # Locate launch4j.jar – running it directly with Java avoids potential
+    # registry lookup issues with the launch4jc.exe wrapper.
     $L4jJar = Get-ChildItem $L4jDir -Filter "launch4j*.jar" -ErrorAction SilentlyContinue |
               Select-Object -First 1 -ExpandProperty FullName
     if (-not $L4jJar) { Write-Error "launch4j JAR not found in $L4jDir" }
 
-    # Use the Java 8 binary directly so launch4j gets the right runtime regardless
-    # of what is registered in the Windows Registry.
-    $JavaExe = if ($env:JAVA_HOME_8_X64) {
-        Join-Path $env:JAVA_HOME_8_X64 "bin\java.exe"
+    # Use Java from JAVA_HOME (Java 17 works fine with Launch4j 3.14+)
+    $JavaExe = if ($env:JAVA_HOME) {
+        Join-Path $env:JAVA_HOME "bin\java.exe"
     } else {
         "java"
     }
