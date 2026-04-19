@@ -120,8 +120,20 @@ function Build-SingleExe {
     }
     if (-not $Launch4jcExe) { Write-Error "launch4jc.exe not found. Ensure Launch4j is installed." }
     Write-Host "[$AppName] Using launch4jc at: $Launch4jcExe"
-    & $Launch4jcExe $TempXml
-    if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
+    # launch4j 3.14 requires Java 8 to run; temporarily point to JDK 8 if available
+    $OrigJavaHome = $env:JAVA_HOME
+    $OrigPath     = $env:PATH
+    try {
+        if ($env:JAVA_HOME_8_X64) {
+            $env:JAVA_HOME = $env:JAVA_HOME_8_X64
+            $env:PATH      = "$env:JAVA_HOME_8_X64\bin;$env:PATH"
+        }
+        & $Launch4jcExe $TempXml
+        if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
+    } finally {
+        $env:JAVA_HOME = $OrigJavaHome
+        $env:PATH      = $OrigPath
+    }
     Write-Host "[$AppName] ✓ $ExeBaseName.exe created"
 
     # Place config and README alongside the exe (warp will bundle them too).
