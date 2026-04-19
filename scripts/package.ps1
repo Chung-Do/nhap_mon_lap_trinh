@@ -60,10 +60,7 @@ $Modules = (
     "java.naming,"         +  # JNDI (JNA dependency)
     "java.net.http,"       +  # HttpClient
     "java.prefs,"          +  # Preferences API
-    "java.security.gss,"   +  # Kerberos/GSSAPI
-    "java.security.sasl,"  +  # SASL auth
     "java.sql,"            +  # JDBC (transitive from several libs)
-    "java.transaction.xa," +  # XA transactions (transitive)
     "java.xml,"            +  # XML / DOM (JSON/config parsing)
     "jdk.unsupported"         # sun.misc.Unsafe (JNA, JNativeHook)
 ).Replace(" ", "")
