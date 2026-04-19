@@ -3,7 +3,7 @@
     <dontWrapJar>false</dontWrapJar>
     <headerType>gui</headerType>
     <jar>target/remote-client.jar</jar>
-    <outfile>client.exe</outfile>
+    <outfile>RemoteClient.exe</outfile>
     <errTitle>Remote Client Error</errTitle>
     <cmdLine></cmdLine>
     <chdir>.</chdir>

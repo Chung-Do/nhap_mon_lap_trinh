@@ -16,7 +16,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      # Step 2: Setup Java (JDK 17 - includes jpackage for bundled-JRE builds)
+      # Step 2: Setup Java (JDK 17 – jlink ships with JDK 9+)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -28,56 +28,53 @@ jobs:
       - name: Build with Maven
         run: mvn clean package -DskipTests -q
       
-      # Step 4: Run packaging script
-      - name: Package Client and Server
+      # Step 4: Install Launch4j (wraps JAR into .exe with bundled JRE path)
+      - name: Install Launch4j
+        run: choco install launch4j -y --no-progress
+        shell: cmd
+
+      # Step 5: Download Warp Packer (bundles a directory into a single .exe)
+      - name: Download Warp Packer
         run: |
-          pwsh -NoProfile -File .\scripts\package.ps1
+          Invoke-WebRequest `
+            -Uri "https://github.com/dgiagio/warp/releases/download/v0.3.0/windows-x64.warp-packer.exe" `
+            -OutFile "warp-packer.exe"
+        shell: pwsh
+
+      # Step 6: Run packaging script (jlink → Launch4j → warp-packer)
+      - name: Package Client and Server
+        run: pwsh -NoProfile -File .\scripts\package.ps1
       
-      # Step 5: Upload artifacts
-      - name: Upload Client ZIP
+      # Step 7: Upload single-file executables as artifacts
+      - name: Upload Server EXE
         uses: actions/upload-artifact@v4
         with:
-          name: remote-client-package
-          path: remote-client.zip
+          name: RemoteServer
+          path: RemoteServer.exe
       
-      - name: Upload Server ZIP
+      - name: Upload Client EXE
         uses: actions/upload-artifact@v4
         with:
-          name: remote-server-package
-          path: remote-server.zip
+          name: RemoteClient
+          path: RemoteClient.exe
       
-      # Step 9: Create Release (optional - only on tags)
+      # Step 8: Create Release and attach EXEs (only on version tags)
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-      
-      # Step 10: Upload release assets (if release created)
-      - name: Upload Release Assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./remote-client.zip
-          asset_name: remote-client-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
+          name: Release ${{ github.ref_name }}
+          files: |
+            RemoteServer.exe
+            RemoteClient.exe
       
       # Step 11: Display build summary
       - name: Build Summary
         run: |
           echo "=== BUILD SUMMARY ==="
           echo "✓ Maven build completed"
-          echo "✓ remote-client.jar created"
-          echo "✓ remote-server.jar created"
-          echo "✓ jpackage app images created (JRE bundled)"
-          echo "✓ remote-client.zip packaged (no Java required)"
-          echo "✓ remote-server.zip packaged (no Java required)"
+          echo "✓ jlink minimal JRE created (~40 MB)"
+          echo "✓ Launch4j wrappers created"
+          echo "✓ RemoteServer.exe – single file, no Java required"
+          echo "✓ RemoteClient.exe – single file, no Java required"
           echo "Artifacts ready for download!"

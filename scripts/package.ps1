@@ -1,8 +1,7 @@
-# PowerShell script to package Client and Server into self-contained ZIP files
-# Uses jpackage (JDK 17+) to bundle the JRE so no Java installation is required.
+# PowerShell script to create single-file .exe bundles using jlink + Launch4j + Warp Packer.
+# The resulting .exe requires no Java installation on the target machine.
 # Usage: .\scripts\package.ps1
 
-# Stop on error
 $ErrorActionPreference = "Stop"
 
 Write-Host "======================================"
@@ -10,249 +9,225 @@ Write-Host "Remote Control App - Packaging Script"
 Write-Host "======================================"
 Write-Host ""
 
-$SourcePath = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
-$TargetPath = Join-Path $SourcePath "target"
-$DistPath   = Join-Path $SourcePath "dist"
-$OutPath    = $SourcePath
+$RootPath   = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
+$TargetPath = Join-Path $RootPath "target"
+$DistPath   = Join-Path $RootPath "dist"
+
+# Warp packer must be placed at repo root (downloaded by CI or manually)
+$WarpPacker = Join-Path $RootPath "warp-packer.exe"
 
 # ---------------------------------------------------------------------------
-# Verify JAR files
+# Verify prerequisites
 # ---------------------------------------------------------------------------
-Write-Host "Checking for JAR files..."
+Write-Host "Checking prerequisites..."
+
 $ClientJar = Join-Path $TargetPath "remote-client.jar"
 $ServerJar = Join-Path $TargetPath "remote-server.jar"
 
 if (-not (Test-Path $ClientJar)) {
-    Write-Host "ERROR: remote-client.jar not found!"
-    Write-Host "Please run: mvn clean package -DskipTests"
-    exit 1
+    Write-Error "remote-client.jar not found. Run: mvn clean package -DskipTests"
 }
 if (-not (Test-Path $ServerJar)) {
-    Write-Host "ERROR: remote-server.jar not found!"
-    Write-Host "Please run: mvn clean package -DskipTests"
-    exit 1
+    Write-Error "remote-server.jar not found. Run: mvn clean package -DskipTests"
 }
+if (-not (Test-Path $WarpPacker)) {
+    Write-Error "warp-packer.exe not found at $WarpPacker"
+}
+
 Write-Host "✓ JAR files found"
+Write-Host "✓ warp-packer.exe found"
 Write-Host ""
 
 # ---------------------------------------------------------------------------
 # Clean dist folder
 # ---------------------------------------------------------------------------
 Write-Host "Cleaning up old dist folder..."
-if (Test-Path $DistPath) {
-    Remove-Item -Path $DistPath -Recurse -Force
-}
+if (Test-Path $DistPath) { Remove-Item -Path $DistPath -Recurse -Force }
+New-Item -Path $DistPath -ItemType Directory | Out-Null
 Write-Host "✓ Cleaned"
 Write-Host ""
 
 # ---------------------------------------------------------------------------
-# Helper function: create a self-contained app image using jpackage
+# Create a minimal JRE with jlink (shared by both apps, ~40 MB)
 # ---------------------------------------------------------------------------
-function New-JPackageAppImage {
-    param(
-        [string]$AppName,
-        [string]$SourceJar
-    )
-    $InputPath = "$DistPath\_input\$AppName"
-    $JarName   = [System.IO.Path]::GetFileName($SourceJar)
-    New-Item -Path $InputPath -ItemType Directory | Out-Null
-    Copy-Item $SourceJar "$InputPath\$JarName"
+$JrePath = Join-Path $DistPath "jre"
+$Modules = (
+    "java.base,"           +  # core runtime
+    "java.datatransfer,"   +  # clipboard (AWT)
+    "java.desktop,"        +  # Swing/AWT GUI, BufferedImage (webcam)
+    "java.logging,"        +  # java.util.logging
+    "java.management,"     +  # JMX / JNA platform
+    "java.naming,"         +  # JNDI (JNA dependency)
+    "java.net.http,"       +  # HttpClient
+    "java.prefs,"          +  # Preferences API
+    "java.security.gss,"   +  # Kerberos/GSSAPI
+    "java.security.sasl,"  +  # SASL auth
+    "java.sql,"            +  # JDBC (transitive from several libs)
+    "java.transaction.xa," +  # XA transactions (transitive)
+    "java.xml,"            +  # XML / DOM (JSON/config parsing)
+    "jdk.unsupported"         # sun.misc.Unsafe (JNA, JNativeHook)
+).Replace(" ", "")
 
-    Write-Host "Building self-contained $AppName app image (this bundles the JRE)..."
-    & jpackage `
-        --type app-image `
-        --name $AppName `
-        --input $InputPath `
-        --main-jar $JarName `
-        --dest $DistPath `
-        --java-options "-Dfile.encoding=UTF-8"
-    if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: jpackage failed for $AppName"; exit 1 }
-    Write-Host "✓ $AppName app image created"
+Write-Host "Creating minimal JRE with jlink..."
+& jlink --output $JrePath --add-modules $Modules --no-header-files --no-man-pages --compress=2
+if ($LASTEXITCODE -ne 0) { Write-Error "jlink failed" }
+Write-Host "✓ Minimal JRE created at $JrePath"
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# Helper: build one single-file .exe (Launch4j wrapper + warp-packer bundle)
+# ---------------------------------------------------------------------------
+function Build-SingleExe {
+    param(
+        [string]$AppName,       # e.g. "RemoteServer"
+        [string]$SourceJar,     # absolute path to fat JAR
+        [string]$L4jTemplate,   # path to launch4j XML template
+        [string]$ExeBaseName,   # inner exe filename without extension
+        [string]$ConfigContent, # content for config.properties
+        [string]$ReadmeContent  # content for README.txt
+    )
+
+    $StagingDir = Join-Path $DistPath "staging\$AppName"
+    New-Item -Path $StagingDir -ItemType Directory -Force | Out-Null
+
+    # Copy minimal JRE into staging dir so launch4j can find it at path "jre"
+    Write-Host "[$AppName] Copying JRE..."
+    Copy-Item -Path $JrePath -Destination (Join-Path $StagingDir "jre") -Recurse
+
+    # Generate a temp launch4j config with absolute jar / outfile paths
+    $TempXml    = Join-Path $DistPath "l4j-$AppName.xml"
+    $OutExePath = Join-Path $StagingDir "$ExeBaseName.exe"
+    [xml]$XmlDoc = Get-Content $L4jTemplate
+    $XmlDoc.launch4jConfig.jar     = $SourceJar
+    $XmlDoc.launch4jConfig.outfile = $OutExePath
+    $XmlDoc.Save($TempXml)
+
+    # Run Launch4j to wrap the JAR into a .exe that uses the bundled jre/
+    Write-Host "[$AppName] Running Launch4j..."
+    & launch4jc $TempXml
+    if ($LASTEXITCODE -ne 0) { Write-Error "launch4jc failed for $AppName" }
+    Write-Host "[$AppName] ✓ $ExeBaseName.exe created"
+
+    # Place config and README alongside the exe (warp will bundle them too).
+    # On first run warp extracts to %LOCALAPPDATA%\warp\packages\<sha256-of-exe>\
+    # so config.properties lives there; launch4j chdir=. ensures the JVM CWD
+    # matches that directory.
+    $ConfigContent | Set-Content -Path (Join-Path $StagingDir "config.properties") -Encoding UTF8
+    $ReadmeContent | Set-Content -Path (Join-Path $StagingDir "README.txt")         -Encoding UTF8
+
+    # Bundle everything into a single self-contained .exe with warp-packer
+    $FinalExe = Join-Path $RootPath "$AppName.exe"
+    Write-Host "[$AppName] Running warp-packer..."
+    & $WarpPacker --arch windows-x64 --input_dir $StagingDir --exec "$ExeBaseName.exe" --output $FinalExe
+    if ($LASTEXITCODE -ne 0) { Write-Error "warp-packer failed for $AppName" }
+    Write-Host "[$AppName] ✓ $AppName.exe (single-file, no Java needed)"
     Write-Host ""
 }
 
 # ---------------------------------------------------------------------------
-# Build self-contained app images with jpackage
+# Config / README text blocks
 # ---------------------------------------------------------------------------
-New-JPackageAppImage -AppName "RemoteServer" -SourceJar $ServerJar
-New-JPackageAppImage -AppName "RemoteClient" -SourceJar $ClientJar
-
-# ---------------------------------------------------------------------------
-# Add README and config files to each app image
-# ---------------------------------------------------------------------------
-$serverReadme = @'
-===============================================================
-REMOTE CONTROL SERVER APPLICATION
-===============================================================
-
-Version: 1.0.0
-Author: Your Name
-
-NO JAVA INSTALLATION REQUIRED - Java runtime is bundled.
-
-INSTALLATION:
-1. Extract remote-server.zip to any folder
-2. Run: RemoteServer.exe
-   (Some features require Administrator privileges)
-
-FEATURES:
-- Application Management
-- Process Control
-- Screen Capture
-- Keylogger
-- File Transfer (Upload/Download)
-- System Control (Shutdown/Restart)
-- Webcam Capture
-- Network Monitoring
-- Remote Desktop
-- System Lock
-
-SECURITY WARNING:
-This server application allows remote control of your system!
-Only run this on a machine you own and control.
-Use on untrusted networks at your own risk.
-
-TROUBLESHOOTING:
-Q: "Port 8888 already in use"
-A: Edit config.properties to use a different port
-
-Q: Cannot receive commands from client
-A: Check firewall - ensure TCP port 8888 is open
-   Run: netstat -an | findstr LISTENING
-
-===============================================================
-'@
-$serverReadme | Set-Content -Path "$DistPath\RemoteServer\README.txt" -Encoding UTF8
-
-$serverConfig = @'
+$ServerConfig = @'
 # Remote Control Server Configuration
-# Edit this file to customize behavior
-
-# Server listening settings
 server.port=8888
 server.listen.timeout=30000
-
-# GUI settings
 gui.window.width=800
 gui.window.height=600
 gui.show.on.startup=true
 gui.log.buffer.lines=1000
-
-# System control settings
 allow.system.shutdown=true
 allow.system.restart=true
 allow.lock.system=true
-
-# File transfer settings
 file.chunk.size=1048576
 file.transfer.timeout=300000
-
-# Keylogger settings
 keylogger.enabled=true
 keylogger.log.file=keylog.txt
-
-# Webcam settings
 webcam.enabled=true
 webcam.fps=15
 webcam.quality=80
-
-# Network monitoring settings
 monitor.enabled=true
 monitor.refresh.interval=1000
 '@
-$serverConfig | Set-Content -Path "$DistPath\RemoteServer\config.properties" -Encoding UTF8
 
-$clientReadme = @'
-===============================================================
-REMOTE CONTROL CLIENT APPLICATION
-===============================================================
-
+$ServerReadme = @'
+REMOTE CONTROL SERVER APPLICATION
+==================================
 Version: 1.0.0
-Author: Your Name
 
-NO JAVA INSTALLATION REQUIRED - Java runtime is bundled.
+NO JAVA INSTALLATION REQUIRED.
+Double-click RemoteServer.exe to start.
+(Some features require Administrator privileges.)
 
-INSTALLATION:
-1. Extract remote-client.zip to any folder
-2. Run: RemoteClient.exe
+FEATURES: App/Process management, Screen capture, Keylogger,
+          File transfer, System control, Webcam, Network monitor.
 
-FEATURES:
-- List/Start/Stop Applications
-- List/Start/Stop/Kill Processes
-- Screenshot Capture
-- Keylogger
-- File Transfer (Download/Upload)
-- System Control (Shutdown/Restart)
-- Webcam Stream
-- Network Monitoring
-- Remote Desktop
-- System Lock
+SECURITY WARNING:
+This server allows remote control of your system.
+Only run on machines you own. Use on trusted networks only.
 
 TROUBLESHOOTING:
-Q: Cannot connect to server
-A: Ensure server is running and both machines are on same LAN
-   Check firewall settings (port 8888)
-
-===============================================================
+- Port 8888 in use  : edit config.properties (in %LOCALAPPDATA%\warp\...)
+- Firewall blocked  : allow TCP port 8888 inbound
 '@
-$clientReadme | Set-Content -Path "$DistPath\RemoteClient\README.txt" -Encoding UTF8
 
-$clientConfig = @'
+$ClientConfig = @'
 # Remote Control Client Configuration
-# Edit this file to customize behavior
-
-# Server connection settings
 server.host=192.168.1.100
 server.port=8888
 connection.timeout=10000
-
-# GUI settings
 gui.window.width=1200
 gui.window.height=800
 gui.log.buffer.lines=1000
-
-# Screenshot settings
 screenshot.quality=90
 screenshot.format=PNG
-
-# Webcam settings
 webcam.fps=15
 webcam.quality=80
-
-# File transfer settings
 file.chunk.size=1048576
-
-# Network monitoring settings
 monitor.refresh.interval=1000
 '@
-$clientConfig | Set-Content -Path "$DistPath\RemoteClient\config.properties" -Encoding UTF8
 
-Write-Host "✓ README and config files added"
-Write-Host ""
+$ClientReadme = @'
+REMOTE CONTROL CLIENT APPLICATION
+==================================
+Version: 1.0.0
+
+NO JAVA INSTALLATION REQUIRED.
+Double-click RemoteClient.exe to start.
+
+TROUBLESHOOTING:
+- Cannot connect: ensure server is running and both machines
+  are on the same LAN. Check firewall (TCP port 8888).
+'@
 
 # ---------------------------------------------------------------------------
-# Create ZIP files
+# Build both executables
 # ---------------------------------------------------------------------------
-Write-Host "Creating ZIP packages..."
+Build-SingleExe `
+    -AppName       "RemoteServer" `
+    -SourceJar     $ServerJar `
+    -L4jTemplate   (Join-Path $RootPath "launch4j-server.xml") `
+    -ExeBaseName   "RemoteServer" `
+    -ConfigContent $ServerConfig `
+    -ReadmeContent $ServerReadme
 
-$ClientZipPath = Join-Path $OutPath "remote-client.zip"
-if (Test-Path $ClientZipPath) { Remove-Item $ClientZipPath -Force }
-Compress-Archive -Path "$DistPath\RemoteClient\*" -DestinationPath $ClientZipPath
-Write-Host "✓ Created: remote-client.zip"
+Build-SingleExe `
+    -AppName       "RemoteClient" `
+    -SourceJar     $ClientJar `
+    -L4jTemplate   (Join-Path $RootPath "launch4j-client.xml") `
+    -ExeBaseName   "RemoteClient" `
+    -ConfigContent $ClientConfig `
+    -ReadmeContent $ClientReadme
 
-$ServerZipPath = Join-Path $OutPath "remote-server.zip"
-if (Test-Path $ServerZipPath) { Remove-Item $ServerZipPath -Force }
-Compress-Archive -Path "$DistPath\RemoteServer\*" -DestinationPath $ServerZipPath
-Write-Host "✓ Created: remote-server.zip"
-
-Write-Host ""
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
 Write-Host "======================================"
 Write-Host "✓ PACKAGING COMPLETED SUCCESSFULLY"
 Write-Host "======================================"
 Write-Host ""
-Write-Host "Output files:"
-Write-Host "  • $ClientZipPath"
-Write-Host "  • $ServerZipPath"
+Write-Host "Output files (single-file, click to run):"
+Write-Host "  • $(Join-Path $RootPath 'RemoteServer.exe')"
+Write-Host "  • $(Join-Path $RootPath 'RemoteClient.exe')"
 Write-Host ""
-Write-Host "No Java installation needed - extract the ZIP and run the .exe directly."
+Write-Host "No Java required. First run extracts in ~2-3 s; subsequent runs are instant."
 Write-Host ""

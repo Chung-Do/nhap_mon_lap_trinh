@@ -3,7 +3,7 @@
     <dontWrapJar>false</dontWrapJar>
     <headerType>gui</headerType>
     <jar>target/remote-server.jar</jar>
-    <outfile>server.exe</outfile>
+    <outfile>RemoteServer.exe</outfile>
     <errTitle>Remote Server Error</errTitle>
     <cmdLine></cmdLine>
     <chdir>.</chdir>
