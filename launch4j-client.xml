@@ -5,20 +5,16 @@
     <jar>target/remote-client.jar</jar>
     <outfile>RemoteClient.exe</outfile>
     <errTitle>Remote Client Error</errTitle>
-    <cmdLine></cmdLine>
     <chdir>.</chdir>
     <priority>normal</priority>
     <downloadUrl>https://www.oracle.com/java/technologies/downloads/</downloadUrl>
-    <supportUrl></supportUrl>
     <stayAlive>false</stayAlive>
     <restartOnCrash>false</restartOnCrash>
-    <icon></icon>
     <jre>
         <path>jre</path>
         <bundledJre64Bit>true</bundledJre64Bit>
         <bundledJreAsFallback>true</bundledJreAsFallback>
         <minVersion>11</minVersion>
-        <maxVersion></maxVersion>
         <jdkPreference>preferJre</jdkPreference>
         <runtimeBits>64</runtimeBits>
     </jre>
@@ -30,7 +26,6 @@
         <productVersion>1.0.0.0</productVersion>
         <txtProductVersion>1.0.0</txtProductVersion>
         <productName>RemoteClient</productName>
-        <companyName></companyName>
         <internalName>RemoteClient</internalName>
         <originalFilename>RemoteClient.exe</originalFilename>
     </versionInfo>
