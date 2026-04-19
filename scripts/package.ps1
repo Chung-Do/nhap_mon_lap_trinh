@@ -1,4 +1,4 @@
-# PowerShell script to package Client and Server into ZIP files
+﻿# PowerShell script to package Client and Server into ZIP files
 # Usage: .\scripts\package.ps1
 
 # Stop on error
