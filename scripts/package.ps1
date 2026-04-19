@@ -1,4 +1,5 @@
-﻿# PowerShell script to package Client and Server into ZIP files
+# PowerShell script to package Client and Server into self-contained ZIP files
+# Uses jpackage (JDK 17+) to bundle the JRE so no Java installation is required.
 # Usage: .\scripts\package.ps1
 
 # Stop on error
@@ -11,30 +12,32 @@ Write-Host ""
 
 $SourcePath = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
 $TargetPath = Join-Path $SourcePath "target"
-$DistPath = Join-Path $SourcePath "dist"
-$OutPath = $SourcePath
+$DistPath   = Join-Path $SourcePath "dist"
+$OutPath    = $SourcePath
 
-# Check if JAR files exist
+# ---------------------------------------------------------------------------
+# Verify JAR files
+# ---------------------------------------------------------------------------
 Write-Host "Checking for JAR files..."
 $ClientJar = Join-Path $TargetPath "remote-client.jar"
 $ServerJar = Join-Path $TargetPath "remote-server.jar"
 
 if (-not (Test-Path $ClientJar)) {
-    Write-Host "❌ ERROR: remote-client.jar not found!"
+    Write-Host "ERROR: remote-client.jar not found!"
     Write-Host "Please run: mvn clean package -DskipTests"
     exit 1
 }
-
 if (-not (Test-Path $ServerJar)) {
-    Write-Host "❌ ERROR: remote-server.jar not found!"
+    Write-Host "ERROR: remote-server.jar not found!"
     Write-Host "Please run: mvn clean package -DskipTests"
     exit 1
 }
-
 Write-Host "✓ JAR files found"
 Write-Host ""
 
-# Clean up old dist folder
+# ---------------------------------------------------------------------------
+# Clean dist folder
+# ---------------------------------------------------------------------------
 Write-Host "Cleaning up old dist folder..."
 if (Test-Path $DistPath) {
     Remove-Item -Path $DistPath -Recurse -Force
@@ -42,147 +45,55 @@ if (Test-Path $DistPath) {
 Write-Host "✓ Cleaned"
 Write-Host ""
 
-# Create Client package structure
-Write-Host "Creating Client package structure..."
-New-Item -Path "$DistPath\remote-client" -ItemType Directory | Out-Null
-Copy-Item -Path $ClientJar -Destination "$DistPath\remote-client\remote-client.jar"
+# ---------------------------------------------------------------------------
+# Helper function: create a self-contained app image using jpackage
+# ---------------------------------------------------------------------------
+function New-JPackageAppImage {
+    param(
+        [string]$AppName,
+        [string]$SourceJar
+    )
+    $InputPath = "$DistPath\_input\$AppName"
+    $JarName   = [System.IO.Path]::GetFileName($SourceJar)
+    New-Item -Path $InputPath -ItemType Directory | Out-Null
+    Copy-Item $SourceJar "$InputPath\$JarName"
 
-# Create Client README
-$clientReadme = @'
-===============================================================
-REMOTE CONTROL CLIENT APPLICATION
-===============================================================
+    Write-Host "Building self-contained $AppName app image (this bundles the JRE)..."
+    & jpackage `
+        --type app-image `
+        --name $AppName `
+        --input $InputPath `
+        --main-jar $JarName `
+        --dest $DistPath `
+        --java-options "-Dfile.encoding=UTF-8"
+    if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: jpackage failed for $AppName"; exit 1 }
+    Write-Host "✓ $AppName app image created"
+    Write-Host ""
+}
 
-Version: 1.0.0
-Language: Java 11+
-Author: Your Name
-Installation Date: Run this from the extracted ZIP
+# ---------------------------------------------------------------------------
+# Build self-contained app images with jpackage
+# ---------------------------------------------------------------------------
+New-JPackageAppImage -AppName "RemoteServer" -SourceJar $ServerJar
+New-JPackageAppImage -AppName "RemoteClient" -SourceJar $ClientJar
 
-PREREQUISITES:
-- Java 11 or higher installed
-- Network connectivity to Server (LAN)
-
-INSTALLATION:
-1. Extract remote-client.zip to a folder
-2. Ensure Java is in your system PATH
-3. Run: java -jar remote-client.jar
-
-FEATURES:
-- List/Start/Stop Applications
-- List/Start/Stop/Kill Processes
-- Screenshot Capture
-- Keylogger
-- File Transfer (Download/Upload)
-- System Control (Shutdown/Restart)
-- Webcam Stream
-- Network Monitoring
-- Remote Desktop
-- System Lock
-
-TROUBLESHOOTING:
-Q: "Java not found"
-A: Install Java 11+ from https://adoptium.net/
-
-Q: Cannot connect to server
-A: Ensure server is running and both machines are on same LAN
-   Check firewall settings (port 8888)
-
-For more info, see: log.md in project root
-
-===============================================================
-'@
-$clientReadme | Set-Content -Path "$DistPath\remote-client\README.txt" -Encoding UTF8
-
-# Create Client launcher batch file
-$clientRunBat = @'
-@echo off
-REM Launch Remote Control Client
-REM Prerequisites: Java 11+
-
-setlocal enabledelayedexpansion
-
-set JAR_FILE=remote-client.jar
-
-if not exist "!JAR_FILE!" (
-    echo ERROR: !JAR_FILE! not found in current directory
-    echo Please ensure you extracted all files from the ZIP
-    pause
-    exit /b 1
-)
-
-where java >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Java not found!
-    echo Please install Java 11+ from https://adoptium.net/
-    pause
-    exit /b 1
-)
-
-echo Starting Remote Control Client...
-java -jar "!JAR_FILE!"
-pause
-'@
-$clientRunBat | Set-Content -Path "$DistPath\remote-client\run.bat" -Encoding ASCII
-
-# Create config template for Client
-$clientConfig = @'
-# Remote Control Client Configuration
-# Edit this file to customize behavior
-
-# Server connection settings
-server.host=192.168.1.100
-server.port=8888
-connection.timeout=10000
-
-# GUI settings
-gui.window.width=1200
-gui.window.height=800
-gui.log.buffer.lines=1000
-
-# Screenshot settings
-screenshot.quality=90
-screenshot.format=PNG
-
-# Webcam settings
-webcam.fps=15
-webcam.quality=80
-
-# File transfer settings
-file.chunk.size=1048576
-
-# Network monitoring settings
-monitor.refresh.interval=1000
-'@
-$clientConfig | Set-Content -Path "$DistPath\remote-client\config.properties" -Encoding UTF8
-
-Write-Host "✓ Client package created"
-Write-Host ""
-
-# Create Server package structure
-Write-Host "Creating Server package structure..."
-New-Item -Path "$DistPath\remote-server" -ItemType Directory | Out-Null
-Copy-Item -Path $ServerJar -Destination "$DistPath\remote-server\remote-server.jar"
-
-# Create Server README
+# ---------------------------------------------------------------------------
+# Add README and config files to each app image
+# ---------------------------------------------------------------------------
 $serverReadme = @'
 ===============================================================
 REMOTE CONTROL SERVER APPLICATION
 ===============================================================
 
 Version: 1.0.0
-Language: Java 11+
 Author: Your Name
-Installation Date: Run this from the extracted ZIP
 
-PREREQUISITES:
-- Java 11 or higher installed
-- Network connectivity to Client (LAN)
-- Windows OS (some features are Windows-specific)
+NO JAVA INSTALLATION REQUIRED - Java runtime is bundled.
 
 INSTALLATION:
-1. Extract remote-server.zip to a folder
-2. Ensure Java is in your system PATH
-3. Run: java -jar remote-server.jar
+1. Extract remote-server.zip to any folder
+2. Run: RemoteServer.exe
+   (Some features require Administrator privileges)
 
 FEATURES:
 - Application Management
@@ -201,63 +112,18 @@ This server application allows remote control of your system!
 Only run this on a machine you own and control.
 Use on untrusted networks at your own risk.
 
-INSTALLATION AS SERVICE (Optional):
-To run as Windows Service, use NSSM:
-1. Download NSSM: https://nssm.cc/
-2. Run: nssm install RemoteControlServer "java -jar remote-server.jar"
-3. Run: nssm start RemoteControlServer
-
 TROUBLESHOOTING:
-Q: "Java not found"
-A: Install Java 11+ from https://adoptium.net/
-
 Q: "Port 8888 already in use"
-A: Edit config.properties to use different port
+A: Edit config.properties to use a different port
 
 Q: Cannot receive commands from client
 A: Check firewall - ensure TCP port 8888 is open
    Run: netstat -an | findstr LISTENING
 
-For more info, see: log.md in project root
-
 ===============================================================
 '@
-$serverReadme | Set-Content -Path "$DistPath\remote-server\README.txt" -Encoding UTF8
+$serverReadme | Set-Content -Path "$DistPath\RemoteServer\README.txt" -Encoding UTF8
 
-# Create Server launcher batch file
-$serverRunBat = @'
-@echo off
-REM Launch Remote Control Server
-REM Prerequisites: Java 11+
-REM NOTE: Some features require Administrator privileges
-
-setlocal enabledelayedexpansion
-
-set JAR_FILE=remote-server.jar
-
-if not exist "!JAR_FILE!" (
-    echo ERROR: !JAR_FILE! not found in current directory
-    echo Please ensure you extracted all files from the ZIP
-    pause
-    exit /b 1
-)
-
-where java >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Java not found!
-    echo Please install Java 11+ from https://adoptium.net/
-    pause
-    exit /b 1
-)
-
-echo Starting Remote Control Server...
-echo NOTE: Some features may require Administrator privileges
-java -jar "!JAR_FILE!"
-pause
-'@
-$serverRunBat | Set-Content -Path "$DistPath\remote-server\run.bat" -Encoding ASCII
-
-# Create config template for Server
 $serverConfig = @'
 # Remote Control Server Configuration
 # Edit this file to customize behavior
@@ -294,28 +160,89 @@ webcam.quality=80
 monitor.enabled=true
 monitor.refresh.interval=1000
 '@
-$serverConfig | Set-Content -Path "$DistPath\remote-server\config.properties" -Encoding UTF8
+$serverConfig | Set-Content -Path "$DistPath\RemoteServer\config.properties" -Encoding UTF8
 
-Write-Host "✓ Server package created"
+$clientReadme = @'
+===============================================================
+REMOTE CONTROL CLIENT APPLICATION
+===============================================================
+
+Version: 1.0.0
+Author: Your Name
+
+NO JAVA INSTALLATION REQUIRED - Java runtime is bundled.
+
+INSTALLATION:
+1. Extract remote-client.zip to any folder
+2. Run: RemoteClient.exe
+
+FEATURES:
+- List/Start/Stop Applications
+- List/Start/Stop/Kill Processes
+- Screenshot Capture
+- Keylogger
+- File Transfer (Download/Upload)
+- System Control (Shutdown/Restart)
+- Webcam Stream
+- Network Monitoring
+- Remote Desktop
+- System Lock
+
+TROUBLESHOOTING:
+Q: Cannot connect to server
+A: Ensure server is running and both machines are on same LAN
+   Check firewall settings (port 8888)
+
+===============================================================
+'@
+$clientReadme | Set-Content -Path "$DistPath\RemoteClient\README.txt" -Encoding UTF8
+
+$clientConfig = @'
+# Remote Control Client Configuration
+# Edit this file to customize behavior
+
+# Server connection settings
+server.host=192.168.1.100
+server.port=8888
+connection.timeout=10000
+
+# GUI settings
+gui.window.width=1200
+gui.window.height=800
+gui.log.buffer.lines=1000
+
+# Screenshot settings
+screenshot.quality=90
+screenshot.format=PNG
+
+# Webcam settings
+webcam.fps=15
+webcam.quality=80
+
+# File transfer settings
+file.chunk.size=1048576
+
+# Network monitoring settings
+monitor.refresh.interval=1000
+'@
+$clientConfig | Set-Content -Path "$DistPath\RemoteClient\config.properties" -Encoding UTF8
+
+Write-Host "✓ README and config files added"
 Write-Host ""
 
+# ---------------------------------------------------------------------------
 # Create ZIP files
+# ---------------------------------------------------------------------------
 Write-Host "Creating ZIP packages..."
 
-# Client ZIP
 $ClientZipPath = Join-Path $OutPath "remote-client.zip"
-if (Test-Path $ClientZipPath) {
-    Remove-Item $ClientZipPath -Force
-}
-Compress-Archive -Path "$DistPath\remote-client\*" -DestinationPath $ClientZipPath
+if (Test-Path $ClientZipPath) { Remove-Item $ClientZipPath -Force }
+Compress-Archive -Path "$DistPath\RemoteClient\*" -DestinationPath $ClientZipPath
 Write-Host "✓ Created: remote-client.zip"
 
-# Server ZIP
 $ServerZipPath = Join-Path $OutPath "remote-server.zip"
-if (Test-Path $ServerZipPath) {
-    Remove-Item $ServerZipPath -Force
-}
-Compress-Archive -Path "$DistPath\remote-server\*" -DestinationPath $ServerZipPath
+if (Test-Path $ServerZipPath) { Remove-Item $ServerZipPath -Force }
+Compress-Archive -Path "$DistPath\RemoteServer\*" -DestinationPath $ServerZipPath
 Write-Host "✓ Created: remote-server.zip"
 
 Write-Host ""
@@ -327,5 +254,5 @@ Write-Host "Output files:"
 Write-Host "  • $ClientZipPath"
 Write-Host "  • $ServerZipPath"
 Write-Host ""
-Write-Host "Next step: Extract ZIPs and run run.bat"
+Write-Host "No Java installation needed - extract the ZIP and run the .exe directly."
 Write-Host ""
