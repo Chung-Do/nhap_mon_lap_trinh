@@ -31,7 +31,7 @@ jobs:
       # Step 4: Run packaging script
       - name: Package Client and Server
         run: |
-          powershell -NoProfile -File .\scripts\package.ps1
+          pwsh -NoProfile -File .\scripts\package.ps1
       
       # Step 5: Upload artifacts
       - name: Upload Client ZIP
