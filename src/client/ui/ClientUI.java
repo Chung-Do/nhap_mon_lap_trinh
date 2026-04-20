@@ -37,58 +37,75 @@ public class ClientUI extends JFrame {
         setLayout(new BorderLayout());
 
         // === TOP PANEL: Connection ===
-        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.setBackground(new Color(52, 73, 94));
         topPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // Title row
+        JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        titleRow.setBackground(new Color(52, 73, 94));
 
         JLabel titleLabel = new JLabel("🖥️ REMOTE CONTROL CLIENT");
         titleLabel.setFont(new Font("Arial", Font.BOLD, 16));
         titleLabel.setForeground(Color.WHITE);
-        topPanel.add(titleLabel);
+        titleRow.add(titleLabel);
 
-        topPanel.add(Box.createHorizontalStrut(50));
+        titleRow.add(Box.createHorizontalStrut(20));
+
+        // Display Client IP
+        JLabel clientIpLabel = new JLabel("Client IP: " + getLocalIPAddress());
+        clientIpLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+        clientIpLabel.setForeground(new Color(255, 223, 186));
+        titleRow.add(clientIpLabel);
+
+        topPanel.add(titleRow);
+        topPanel.add(Box.createVerticalStrut(5));
+
+        // Connection controls row
+        JPanel controlRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        controlRow.setBackground(new Color(52, 73, 94));
 
         JLabel hostLabel = new JLabel("Server:");
         hostLabel.setForeground(Color.WHITE);
-        topPanel.add(hostLabel);
+        controlRow.add(hostLabel);
 
         hostField = new JTextField("localhost", 12);
-        topPanel.add(hostField);
+        controlRow.add(hostField);
 
         JLabel portLabel = new JLabel("Port:");
         portLabel.setForeground(Color.WHITE);
-        topPanel.add(portLabel);
+        controlRow.add(portLabel);
 
         portField = new JTextField(String.valueOf(Constants.DEFAULT_PORT), 6);
-        topPanel.add(portField);
+        controlRow.add(portField);
 
         connectButton = new JButton("Connect");
         connectButton.addActionListener(e -> toggleConnection());
-        topPanel.add(connectButton);
+        controlRow.add(connectButton);
 
         statusLabel = new JLabel("● Disconnected");
         statusLabel.setForeground(Color.RED);
         statusLabel.setFont(new Font("Arial", Font.BOLD, 12));
-        topPanel.add(statusLabel);
+        controlRow.add(statusLabel);
 
+        topPanel.add(controlRow);
         add(topPanel, BorderLayout.NORTH);
 
         // === CENTER: Tabbed Pane ===
         tabbedPane = new JTabbedPane();
 
-        // Add tabs
+        // Add all feature tabs
         tabbedPane.addTab("Applications", new ApplicationTab(clientCore, logger));
         tabbedPane.addTab("Processes", new ProcessTab(clientCore, logger));
         tabbedPane.addTab("Screenshot", new ScreenshotTab(clientCore, logger));
+        tabbedPane.addTab("Keylogger", new KeyloggerTab(clientCore, logger));
         tabbedPane.addTab("File Transfer", new FileTransferTab(clientCore, logger));
         tabbedPane.addTab("System Control", new SystemControlTab(clientCore, logger));
-
-        // Stub tabs
-        tabbedPane.addTab("Keylogger", createStubPanel("Keylogger"));
-        tabbedPane.addTab("Webcam", createStubPanel("Webcam"));
-        tabbedPane.addTab("Network Monitor", createStubPanel("Network Monitor"));
-        tabbedPane.addTab("Remote Desktop", createStubPanel("Remote Desktop"));
-        tabbedPane.addTab("System Lock", createStubPanel("System Lock"));
+        tabbedPane.addTab("Webcam", new WebcamTab(clientCore, logger));
+        tabbedPane.addTab("Network Monitor", new NetworkMonitorTab(clientCore, logger));
+        tabbedPane.addTab("Remote Desktop", new RemoteDesktopTab(clientCore, logger));
+        tabbedPane.addTab("System Lock", new SystemLockTab(clientCore, logger));
 
         add(tabbedPane, BorderLayout.CENTER);
 
@@ -150,15 +167,38 @@ public class ClientUI extends JFrame {
     }
 
     /**
-     * Create stub panel cho features chưa implement.
+     * Get local IP address of this machine.
+     * Shows the primary IPv4 address (useful for LAN connections).
+     *
+     * @return IP address string
      */
-    private JPanel createStubPanel(String featureName) {
-        JPanel panel = new JPanel(new BorderLayout());
-        JLabel label = new JLabel("<html><h2>" + featureName + "</h2>" +
-            "<p>TODO: Feature not yet implemented</p></html>",
-            SwingConstants.CENTER);
-        label.setFont(new Font("Arial", Font.PLAIN, 14));
-        panel.add(label, BorderLayout.CENTER);
-        return panel;
+    private String getLocalIPAddress() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> interfaces =
+                java.net.NetworkInterface.getNetworkInterfaces();
+
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface iface = interfaces.nextElement();
+
+                // Skip loopback and down interfaces
+                if (iface.isLoopback() || !iface.isUp()) {
+                    continue;
+                }
+
+                java.util.Enumeration<java.net.InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    java.net.InetAddress addr = addresses.nextElement();
+
+                    // Return first IPv4 address
+                    if (addr instanceof java.net.Inet4Address) {
+                        return addr.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            return "Unable to detect";
+        }
+
+        return "No network found";
     }
 }
