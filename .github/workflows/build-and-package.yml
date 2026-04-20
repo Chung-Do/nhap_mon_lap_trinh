@@ -22,19 +22,45 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: maven
+          cache: 'maven'
 
-      # Verify JDK 17 installation
-      - name: Verify JDK 17 Installation
+      # Clean old artifacts and Maven cache (prevent cache issues)
+      - name: Clean Old Artifacts and Cache
         run: |
-          echo "JAVA_HOME: $env:JAVA_HOME"
-          java -version
-          Write-Host "✓ JDK 17 verified" -ForegroundColor Green
+          Write-Host "=== Cleaning old artifacts ===" -ForegroundColor Cyan
+
+          # Remove target directory
+          if (Test-Path "target") {
+            Write-Host "Removing old target directory..." -ForegroundColor Yellow
+            Remove-Item -Path "target" -Recurse -Force
+          }
+
+          # Remove old EXE files
+          if (Test-Path "RemoteServer.exe") {
+            Remove-Item "RemoteServer.exe" -Force
+          }
+          if (Test-Path "RemoteClient.exe") {
+            Remove-Item "RemoteClient.exe" -Force
+          }
+
+          # Remove dist folder
+          if (Test-Path "dist") {
+            Remove-Item -Path "dist" -Recurse -Force
+          }
+
+          # Clear local Maven repo cache for this project (prevents stale artifacts)
+          $MavenCache = "$env:USERPROFILE\.m2\repository\com\remotecontrol"
+          if (Test-Path $MavenCache) {
+            Write-Host "Clearing Maven local cache for project..." -ForegroundColor Yellow
+            Remove-Item -Path $MavenCache -Recurse -Force
+          }
+
+          Write-Host "✓ Cleanup complete" -ForegroundColor Green
         shell: pwsh
-      
-      # Step 3: Build with Maven
+
+      # Step 3: Build with Maven (force update to avoid cache issues)
       - name: Build with Maven
-        run: mvn clean package -DskipTests
+        run: mvn clean package -DskipTests -U
 
       # Verify JAR files were created
       - name: Verify JAR Files

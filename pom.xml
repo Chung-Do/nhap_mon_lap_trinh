@@ -69,7 +69,23 @@
                 </configuration>
             </plugin>
 
-            <!-- Maven Assembly Plugin - Build JAR with dependencies for SERVER & CLIENT -->
+            <!-- Maven JAR Plugin - Skip default JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <skipIfEmpty>true</skipIfEmpty>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-jar</id>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Maven Assembly Plugin - Build 2 fat JARs -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
@@ -93,7 +109,6 @@
                             </descriptorRefs>
                             <finalName>remote-server</finalName>
                             <appendAssemblyId>false</appendAssemblyId>
-                            <attach>false</attach>
                         </configuration>
                     </execution>
                     <!-- Client JAR -->
@@ -114,7 +129,6 @@
                             </descriptorRefs>
                             <finalName>remote-client</finalName>
                             <appendAssemblyId>false</appendAssemblyId>
-                            <attach>false</attach>
                         </configuration>
                     </execution>
                 </executions>
